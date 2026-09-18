@@ -1,0 +1,44 @@
+{
+  "name": "embedifybot",
+  "version": "1.0.0",
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/ReignOfTea/Embedify",
+  "bugs": {
+    "url": "https://github.com/ReignOfTea/Embedify/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ReignOfTea/Embedify.git"
+  },
+  "private": false,
+  "type": "module",
+  "description": "Telegram bot that rewrites social links into embed-friendly URLs",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node --disable-warning=ExperimentalWarning dist/index.js",
+    "pm2:start": "npm run build && node -e \"require('fs').mkdirSync('logs',{recursive:true})\" && pm2 start ecosystem.config.cjs",
+    "pm2:reload": "npm run build && pm2 reload embedify --update-env",
+    "pm2:restart": "npm run build && pm2 restart embedify --update-env",
+    "pm2:stop": "pm2 stop embedify",
+    "pm2:delete": "pm2 delete embedify",
+    "pm2:logs": "pm2 logs embedify",
+    "pm2:status": "pm2 show embedify"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "cloudflared": "^0.7.3",
+    "dotenv": "^17.2.2",
+    "grammy": "^1.38.3",
+    "hono": "^4.13.8",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
