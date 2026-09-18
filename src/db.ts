@@ -385,12 +385,12 @@ export class Store {
     );
     const statStmt = this.db.prepare(
       `INSERT INTO rewrite_stats (day, chat_id, rule_id, dest_host, rewrites, failures)
-       VALUES (?, ?, ?, '', 0, 1)
+       VALUES (?, ?, ?, ?, 0, 1)
        ON CONFLICT(day, chat_id, rule_id, dest_host)
        DO UPDATE SET failures = failures + 1`,
     );
     for (const event of events) {
-      failStmt.run(event.chatId, event.ruleId, event.reason, event.detail.slice(0, 400), ts);
+      failStmt.run(event.chatId, event.ruleId ?? null, event.reason, event.detail.slice(0, 400), ts);
       statStmt.run(day, event.chatId, event.ruleId ?? "_", "");
     }
     const oldestKeep = this.db
