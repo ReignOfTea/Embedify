@@ -5,9 +5,9 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { AppConfig } from "../config.js";
 import type { BotContext } from "../bot/context.js";
-import type { Rule, RuleDraft, Store } from "../db.js";
+import type { Rule, RuleDraft, RulesExport, Store } from "../db.js";
 import { log } from "../logger.js";
-import { compilePattern, parseHostList, parseHostname } from "../rewrite.js";
+import { compilePattern, parseHostList, parseStringList } from "../rewrite.js";
 import { verifyInitData, type TelegramUser } from "./initData.js";
 
 type Env = {
@@ -49,6 +49,23 @@ export async function startWebApp(
       owner,
       stats: store.stats(),
     });
+  });
+
+  api.get("/stats", async (c) => {
+    requireOwner(c.get("owner"));
+    return c.json(store.dashboardStats());
+  });
+
+  api.get("/export", async (c) => {
+    requireOwner(c.get("owner"));
+    return c.json(store.exportRules());
+  });
+
+  api.post("/import", async (c) => {
+    requireOwner(c.get("owner"));
+    const bundle = parseExport(await c.req.json());
+    const result = store.importRules(bundle);
+    return c.json(result);
   });
 
   api.get("/rules", async (c) => {
@@ -102,15 +119,36 @@ export async function startWebApp(
     return c.json({ chats: store.listGroups() });
   });
 
+  api.get("/chats/:id/export", async (c) => {
+    const chatId = Number(c.req.param("id"));
+    await requireChatAdmin(bot, config, c.get("user").id, c.get("owner"), chatId);
+    return c.json(store.exportRules(chatId));
+  });
+
+  api.post("/chats/:id/import", async (c) => {
+    const chatId = Number(c.req.param("id"));
+    await requireChatAdmin(bot, config, c.get("user").id, c.get("owner"), chatId);
+    const bundle = parseExport(await c.req.json());
+    const result = store.importRules(bundle, chatId);
+    return c.json(result);
+  });
+
   api.patch("/chats/:id", async (c) => {
     const chatId = Number(c.req.param("id"));
     await requireChatAdmin(bot, config, c.get("user").id, c.get("owner"), chatId);
-    const body = await c.req.json().catch(() => ({})) as { approved?: boolean; enabled?: boolean };
+    const body = await c.req.json().catch(() => ({})) as {
+      approved?: boolean;
+      enabled?: boolean;
+      previewAll?: boolean;
+    };
     if (typeof body.approved === "boolean") {
       store.setGroupApproval(chatId, body.approved, c.get("user").id);
     }
     if (typeof body.enabled === "boolean") {
       store.setGroupEnabled(chatId, body.enabled);
+    }
+    if (typeof body.previewAll === "boolean") {
+      store.setGroupPreviewAll(chatId, body.previewAll);
     }
     const chat = store.getGroup(chatId);
     if (!chat) throw new HTTPException(404, { message: "Chat not found" });
@@ -245,11 +283,13 @@ function serializeRule(rule: Rule) {
     name: rule.name,
     description: rule.description,
     mode: rule.mode,
-    fromHosts: rule.fromHosts,
-    toHost: rule.toHost,
+    match: rule.match,
+    replaces: rule.replaces,
+    fromHosts: rule.match,
+    toHost: rule.replaces[0] ?? null,
     stripQuery: rule.stripQuery,
-    pattern: rule.pattern,
-    replacement: rule.replacement,
+    pattern: rule.mode === "regex" ? (rule.match[0] ?? null) : null,
+    replacement: rule.mode === "regex" ? (rule.replaces[0] ?? null) : null,
     enabled: rule.enabled,
     builtin: rule.builtin,
     userModified: rule.userModified,
@@ -264,29 +304,29 @@ async function parseRuleDraft(body: unknown, chatId: number | null): Promise<Rul
   if (!name) throw new HTTPException(400, { message: "Name is required" });
   const mode = data.mode === "regex" ? "regex" : "host";
   if (mode === "host") {
-    const fromHosts = parseHostList(String(data.fromHosts ?? ""));
-    const toHost = parseHostname(String(data.toHost ?? ""));
-    if (fromHosts.length === 0 || !toHost) {
-      throw new HTTPException(400, { message: "Host rules need match hosts and a destination host" });
+    const match = parseHostList(String(data.match ?? data.fromHosts ?? ""));
+    const replaces = parseHostList(String(data.replaces ?? data.toHost ?? ""));
+    if (match.length === 0 || replaces.length === 0) {
+      throw new HTTPException(400, { message: "Host rules need match hosts and at least one replace host" });
     }
     return {
       name,
       mode,
-      fromHosts,
-      toHost,
+      match,
+      replaces,
       stripQuery: data.stripQuery !== false,
       chatId,
     };
   }
-  const pattern = String(data.pattern ?? "");
-  const replacement = String(data.replacement ?? "").trim();
+  const pattern = String(data.pattern ?? (Array.isArray(data.match) ? data.match[0] : data.match) ?? "");
+  const replaces = parseStringList(String(data.replaces ?? data.replacement ?? ""));
   try {
     compilePattern(pattern);
   } catch {
     throw new HTTPException(400, { message: "Invalid regex" });
   }
-  if (!replacement) throw new HTTPException(400, { message: "Replacement is required" });
-  return { name, mode, pattern, replacement, chatId };
+  if (replaces.length === 0) throw new HTTPException(400, { message: "At least one replacement is required" });
+  return { name, mode, match: [pattern], replaces, chatId };
 }
 
 async function parseRulePatch(body: unknown, current: Rule): Promise<Partial<RuleDraft>> {
@@ -297,15 +337,26 @@ async function parseRulePatch(body: unknown, current: Rule): Promise<Partial<Rul
     if (!name) throw new HTTPException(400, { message: "Name is required" });
     patch.name = name;
   }
-  if (data.fromHosts != null) {
-    const fromHosts = parseHostList(String(data.fromHosts));
-    if (fromHosts.length === 0) throw new HTTPException(400, { message: "No hosts parsed" });
-    patch.fromHosts = fromHosts;
+  if (data.match != null || data.fromHosts != null) {
+    if (current.mode === "regex") {
+      const pattern = String(data.match ?? data.fromHosts ?? "");
+      try {
+        compilePattern(pattern);
+      } catch {
+        throw new HTTPException(400, { message: "Invalid regex" });
+      }
+      patch.match = [pattern];
+    } else {
+      const match = parseHostList(String(data.match ?? data.fromHosts));
+      if (match.length === 0) throw new HTTPException(400, { message: "No hosts parsed" });
+      patch.match = match;
+    }
   }
-  if (data.toHost != null) {
-    const toHost = parseHostname(String(data.toHost));
-    if (!toHost) throw new HTTPException(400, { message: "Invalid destination host" });
-    patch.toHost = toHost;
+  if (data.replaces != null || data.toHost != null || data.replacement != null) {
+    const raw = String(data.replaces ?? data.toHost ?? data.replacement ?? "");
+    const replaces = current.mode === "regex" ? parseStringList(raw) : parseHostList(raw);
+    if (replaces.length === 0) throw new HTTPException(400, { message: "No replacements parsed" });
+    patch.replaces = replaces;
   }
   if (data.stripQuery != null) patch.stripQuery = Boolean(data.stripQuery);
   if (data.pattern != null) {
@@ -314,18 +365,26 @@ async function parseRulePatch(body: unknown, current: Rule): Promise<Partial<Rul
     } catch {
       throw new HTTPException(400, { message: "Invalid regex" });
     }
-    patch.pattern = String(data.pattern);
-  }
-  if (data.replacement != null) {
-    const replacement = String(data.replacement).trim();
-    if (!replacement) throw new HTTPException(400, { message: "Replacement is required" });
-    patch.replacement = replacement;
+    patch.match = [String(data.pattern)];
   }
   if (data.enabled != null) patch.enabled = Boolean(data.enabled);
   if (Object.keys(patch).length === 0) {
     return { name: current.name };
   }
   return patch;
+}
+
+function parseExport(body: unknown): RulesExport {
+  const data = asRecord(body);
+  if (data.version !== 1 && data.version != null) {
+    throw new HTTPException(400, { message: "Unsupported export version" });
+  }
+  return {
+    version: 1,
+    exportedAt: Number(data.exportedAt ?? Date.now()),
+    globalRules: Array.isArray(data.globalRules) ? (data.globalRules as RulesExport["globalRules"]) : [],
+    chats: Array.isArray(data.chats) ? (data.chats as RulesExport["chats"]) : [],
+  };
 }
 
 function asRecord(body: unknown): Record<string, unknown> {

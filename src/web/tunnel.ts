@@ -7,14 +7,36 @@ export type TunnelHandle = {
   stop: () => void;
 };
 
-export async function startCloudflareTunnel(localUrl: string): Promise<TunnelHandle> {
+export async function startCloudflareTunnel(options: {
+  localUrl: string;
+  token?: string | null;
+  publicUrl?: string | null;
+}): Promise<TunnelHandle> {
   if (!existsSync(bin)) {
     log.info("Downloading cloudflared for this OS (first run only)…");
     await install(bin);
   }
 
-  log.info(`Starting Cloudflare quick tunnel → ${localUrl}`);
-  const tunnel = Tunnel.quick(localUrl);
+  if (options.token) {
+    if (!options.publicUrl) {
+      throw new Error("Named Cloudflare tunnels need WEBAPP_URL for the public hostname");
+    }
+    log.info(`Starting named Cloudflare tunnel → ${options.localUrl}`);
+    const tunnel = Tunnel.withToken(options.token);
+    const recent: string[] = [];
+    const onLog = (chunk: string) => {
+      recent.push(chunk.trim());
+      if (recent.length > 30) recent.shift();
+    };
+    tunnel.on("stdout", onLog);
+    tunnel.on("stderr", onLog);
+    await waitForConnected(tunnel, 20_000);
+    log.info(`Mini App public URL: ${options.publicUrl}`);
+    return attachStop(tunnel, options.publicUrl);
+  }
+
+  log.info(`Starting Cloudflare quick tunnel → ${options.localUrl}`);
+  const tunnel = Tunnel.quick(options.localUrl);
   const recent: string[] = [];
 
   const onLog = (chunk: string) => {
@@ -25,10 +47,13 @@ export async function startCloudflareTunnel(localUrl: string): Promise<TunnelHan
   tunnel.on("stderr", onLog);
 
   const publicUrl = await waitForUrl(tunnel, recent);
-  await waitForConnected(tunnel);
+  await waitForConnected(tunnel, 8_000);
 
   log.info(`Mini App public URL: ${publicUrl}`);
+  return attachStop(tunnel, publicUrl);
+}
 
+function attachStop(tunnel: Tunnel, publicUrl: string): TunnelHandle {
   tunnel.on("exit", (code, signal) => {
     log.warn(`cloudflared exited (code ${code ?? "none"}, signal ${signal ?? "none"})`);
   });
@@ -87,9 +112,9 @@ function waitForUrl(tunnel: Tunnel, recent: string[]): Promise<string> {
   });
 }
 
-function waitForConnected(tunnel: Tunnel): Promise<void> {
+function waitForConnected(tunnel: Tunnel, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, 8_000);
+    const timer = setTimeout(resolve, timeoutMs);
     tunnel.once("connected", () => {
       clearTimeout(timer);
       resolve();

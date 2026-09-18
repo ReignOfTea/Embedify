@@ -5,97 +5,83 @@ export type BuiltinRule = {
   name: string;
   description: string;
   mode: RuleMode;
-  fromHosts: string[];
-  toHost: string | null;
+  /** Hosts to match (host mode) or a single regex (regex mode). */
+  match: string[];
+  /** Prioritized destinations / replacement templates. First healthy one wins. */
+  replaces: string[];
   stripQuery: boolean;
-  pattern: string | null;
-  replacement: string | null;
   enabled: boolean;
 };
 
 export const builtinRules: BuiltinRule[] = [
   {
     id: "x",
-    name: "X / Twitter → FixupX",
-    description: "Better tweet embeds via fixupx.com",
+    name: "X / Twitter",
+    description: "Better tweet embeds via FixupX, then FxTwitter / VxTwitter",
     mode: "host",
-    fromHosts: ["x.com", "twitter.com", "mobile.twitter.com", "m.twitter.com"],
-    toHost: "fixupx.com",
+    match: ["x.com", "twitter.com", "mobile.twitter.com", "m.twitter.com"],
+    replaces: ["fixupx.com", "fxtwitter.com", "vxtwitter.com"],
     stripQuery: true,
-    pattern: null,
-    replacement: null,
     enabled: true,
   },
   {
     id: "ig",
-    name: "Instagram → DDInstagram",
+    name: "Instagram",
     description: "Reels, posts, and IGTV embeds",
     mode: "host",
-    fromHosts: ["instagram.com"],
-    toHost: "ddinstagram.com",
+    match: ["instagram.com"],
+    replaces: ["ddinstagram.com", "kkinstagram.com", "instagramez.com"],
     stripQuery: true,
-    pattern: null,
-    replacement: null,
     enabled: true,
   },
   {
     id: "tt",
-    name: "TikTok → VxTikTok",
+    name: "TikTok",
     description: "Videos and mobile short links",
     mode: "host",
-    fromHosts: ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com", "m.tiktok.com"],
-    toHost: "vxtiktok.com",
+    match: ["tiktok.com", "vm.tiktok.com", "vt.tiktok.com", "m.tiktok.com"],
+    replaces: ["vxtiktok.com", "tnktok.com"],
     stripQuery: true,
-    pattern: null,
-    replacement: null,
     enabled: true,
   },
   {
     id: "rd",
-    name: "Reddit → VxReddit",
+    name: "Reddit",
     description: "Post and comment embeds",
     mode: "host",
-    fromHosts: ["reddit.com", "old.reddit.com", "new.reddit.com", "m.reddit.com"],
-    toHost: "vxreddit.com",
+    match: ["reddit.com", "old.reddit.com", "new.reddit.com", "m.reddit.com"],
+    replaces: ["vxreddit.com", "rxddit.com"],
     stripQuery: true,
-    pattern: null,
-    replacement: null,
     enabled: false,
   },
   {
     id: "bsky",
-    name: "Bluesky → FxBsky",
+    name: "Bluesky",
     description: "bsky.app post embeds",
     mode: "host",
-    fromHosts: ["bsky.app"],
-    toHost: "fxbsky.app",
+    match: ["bsky.app"],
+    replaces: ["fxbsky.app"],
     stripQuery: true,
-    pattern: null,
-    replacement: null,
     enabled: false,
   },
   {
     id: "threads",
-    name: "Threads → FixThreads",
+    name: "Threads",
     description: "Threads post embeds",
     mode: "host",
-    fromHosts: ["threads.net", "threads.com"],
-    toHost: "fixthreads.net",
+    match: ["threads.net", "threads.com"],
+    replaces: ["fixthreads.net"],
     stripQuery: true,
-    pattern: null,
-    replacement: null,
     enabled: false,
   },
   {
     id: "pixiv",
-    name: "Pixiv → Phixiv",
+    name: "Pixiv",
     description: "Artwork embeds",
     mode: "host",
-    fromHosts: ["pixiv.net"],
-    toHost: "phixiv.net",
+    match: ["pixiv.net"],
+    replaces: ["phixiv.net"],
     stripQuery: true,
-    pattern: null,
-    replacement: null,
     enabled: false,
   },
 ];

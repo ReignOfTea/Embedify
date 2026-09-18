@@ -17,6 +17,7 @@ const envSchema = z.object({
   WEBAPP_PORT: z.string().optional(),
   WEBAPP_HOST: z.string().optional(),
   WEBAPP_TUNNEL: z.enum(["0", "1"]).optional(),
+  CLOUDFLARE_TUNNEL_TOKEN: z.string().optional(),
 });
 
 export type AppConfig = {
@@ -29,6 +30,7 @@ export type AppConfig = {
   webAppPort: number;
   webAppHost: string;
   webAppTunnel: boolean;
+  cloudflareTunnelToken: string | null;
 };
 
 export function loadConfig(): AppConfig {
@@ -70,6 +72,13 @@ export function loadConfig(): AppConfig {
     }
   }
 
+  const cloudflareTunnelToken = parsed.data.CLOUDFLARE_TUNNEL_TOKEN?.trim() || null;
+  if (cloudflareTunnelToken && !webAppUrl) {
+    throw new Error(
+      "CLOUDFLARE_TUNNEL_TOKEN requires WEBAPP_URL (the stable hostname routed to this tunnel)",
+    );
+  }
+
   return {
     token: parsed.data.TELEGRAM_TOKEN,
     adminIds,
@@ -82,5 +91,6 @@ export function loadConfig(): AppConfig {
     webAppPort: Number(parsed.data.WEBAPP_PORT ?? 8787) || 8787,
     webAppHost: parsed.data.WEBAPP_HOST ?? "127.0.0.1",
     webAppTunnel: parsed.data.WEBAPP_TUNNEL !== "0",
+    cloudflareTunnelToken,
   };
 }

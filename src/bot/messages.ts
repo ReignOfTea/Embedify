@@ -1,6 +1,7 @@
 import type { Composer } from "grammy";
 import type { Store } from "../db.js";
-import { collectMessageUrls, rewriteUrls } from "../rewrite.js";
+import { embedifyUrls } from "../pipeline.js";
+import { collectMessageUrls } from "../rewrite.js";
 import { isManagedChatType } from "./auth.js";
 import type { BotContext } from "./context.js";
 
@@ -32,23 +33,44 @@ export function registerMessages(bot: Composer<BotContext>, store: Store): void 
     });
     if (urls.length === 0) return;
 
+    const chatId = isManaged ? chat.id : 0;
     const rules = store.effectiveRules(isManaged ? chat.id : null);
-    const hits = rewriteUrls(urls, rules);
+    const { hits, failures } = await embedifyUrls(urls, rules);
+    if (failures.length > 0) {
+      store.recordFailures(
+        failures.map((failure) => ({
+          chatId,
+          ruleId: failure.ruleId,
+          reason: failure.reason,
+          detail: failure.detail,
+        })),
+      );
+    }
     if (hits.length === 0) return;
 
-    store.bumpHits(hits.map((hit) => hit.ruleId));
-    const rewritten = hits.map((hit) => hit.rewritten);
+    store.recordRewrites(
+      hits.map((hit) => ({
+        chatId,
+        ruleId: hit.ruleId,
+        destHost: hit.destHost,
+      })),
+    );
 
-    await ctx.reply(rewritten.join("\n"), {
-      reply_parameters: { message_id: msg.message_id },
-      ...(msg.message_thread_id !== undefined
-        ? { message_thread_id: msg.message_thread_id }
-        : {}),
-      link_preview_options: {
-        url: rewritten[0],
-        prefer_large_media: true,
-        show_above_text: false,
-      },
-    });
+    const previewAll = isManaged ? (store.getGroup(chat.id)?.previewAll ?? true) : true;
+    const toSend = previewAll ? hits : hits.slice(0, 1);
+    const thread =
+      msg.message_thread_id !== undefined ? { message_thread_id: msg.message_thread_id } : {};
+
+    for (const hit of toSend) {
+      await ctx.reply(hit.rewritten, {
+        reply_parameters: { message_id: msg.message_id },
+        ...thread,
+        link_preview_options: {
+          url: hit.rewritten,
+          prefer_large_media: true,
+          show_above_text: false,
+        },
+      });
+    }
   });
 }

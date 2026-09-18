@@ -280,3 +280,30 @@ code {
   font-size: 13px;
   word-break: break-all;
 }
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 8px 12px 12px;
+}
+
+.stat-card {
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--section);
+}
+
+.stat-card .value {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.stat-card .label {
+  color: var(--hint);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

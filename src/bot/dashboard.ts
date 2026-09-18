@@ -210,6 +210,20 @@ export function registerDashboard(
     if (group) await showGroup(ctx, store, group.chatId, false);
   });
 
+  bot.callbackQuery(/^g:prev:(-?\d+)$/, async (ctx) => {
+    if (!(await guardOwner(ctx, config))) return;
+    const current = store.getGroup(Number(ctx.match[1]));
+    if (!current) {
+      await ctx.answerCallbackQuery({ text: "Unknown group", show_alert: true });
+      return;
+    }
+    const group = store.setGroupPreviewAll(current.chatId, !current.previewAll);
+    await ctx.answerCallbackQuery({
+      text: group?.previewAll ? "One reply per rewritten link" : "Only the first rewritten link",
+    });
+    if (group) await showGroup(ctx, store, group.chatId, false);
+  });
+
   bot.callbackQuery(/^cr:(-?\d+):(\d+)$/, async (ctx) => {
     const chatId = Number(ctx.match[1]);
     if (!(await guardChatAdmin(ctx, config, chatId))) return;
@@ -396,6 +410,7 @@ async function showGroup(
       `<b>${escapeHtml(group.title)}</b>`,
       "",
       `Status: ${escapeHtml(groupStatus(group))}`,
+      `Previews: ${group.previewAll ? "one reply per rewritten link" : "first rewritten link only"}`,
       `Type: ${escapeHtml(group.type)}`,
       `Username: ${escapeHtml(username)}`,
       `Chat ID: <code>${group.chatId}</code>`,

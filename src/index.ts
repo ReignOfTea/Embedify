@@ -5,6 +5,7 @@ import { configureMenuButton } from "./bot/webapp.js";
 import { loadConfig, projectRoot } from "./config.js";
 import { Store } from "./db.js";
 import { log } from "./logger.js";
+import { getBuiltin } from "./rules.js";
 import { rewriteUrl } from "./rewrite.js";
 import { startWebApp } from "./web/server.js";
 import { startCloudflareTunnel, type TunnelHandle } from "./web/tunnel.js";
@@ -20,9 +21,23 @@ const httpServer = await startWebApp(config, store, bot);
 let tunnel: TunnelHandle | null = null;
 let stopping = false;
 
-if (!config.webAppUrl && config.webAppTunnel) {
+const localUrl = `http://127.0.0.1:${config.webAppPort}`;
+if (config.cloudflareTunnelToken) {
   try {
-    tunnel = await startCloudflareTunnel(`http://127.0.0.1:${config.webAppPort}`);
+    tunnel = await startCloudflareTunnel({
+      localUrl,
+      token: config.cloudflareTunnelToken,
+      publicUrl: config.webAppUrl,
+    });
+  } catch (error) {
+    log.warn(
+      "Could not start the named Cloudflare tunnel. Check CLOUDFLARE_TUNNEL_TOKEN and that WEBAPP_URL is routed to this process.",
+      error,
+    );
+  }
+} else if (!config.webAppUrl && config.webAppTunnel) {
+  try {
+    tunnel = await startCloudflareTunnel({ localUrl });
     config.webAppUrl = tunnel.publicUrl;
   } catch (error) {
     log.warn(
@@ -85,8 +100,9 @@ await bot.start({
 });
 
 function selfCheck(store: Store): void {
-  const x = store.getRule("x");
-  if (!x) throw new Error("Built-in X rule is missing");
+  if (!store.getRule("x")) throw new Error("Built-in X rule is missing");
+  const x = getBuiltin("x");
+  if (!x) throw new Error("Built-in X definition is missing");
   const sample = "https://x.com/disclosetv/status/2100970764702773454";
   const hit = rewriteUrl(sample, [x]);
   if (hit?.rewritten !== "https://fixupx.com/disclosetv/status/2100970764702773454") {

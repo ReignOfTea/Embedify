@@ -32,12 +32,12 @@ export function ruleKeyboard(rule: Rule): InlineKeyboard {
     .text("Rename", `r:e:${rule.id}:name`);
 
   if (rule.mode === "host") {
-    keyboard.row().text("Edit hosts", `r:e:${rule.id}:fromHosts`);
-    keyboard.row().text("Edit destination", `r:e:${rule.id}:toHost`);
+    keyboard.row().text("Edit match hosts", `r:e:${rule.id}:match`);
+    keyboard.row().text("Edit replaces", `r:e:${rule.id}:replaces`);
     keyboard.row().text(rule.stripQuery ? "Keep query params" : "Strip query params", `r:q:${rule.id}`);
   } else {
     keyboard.row().text("Edit regex", `r:e:${rule.id}:pattern`);
-    keyboard.row().text("Edit replacement", `r:e:${rule.id}:replacement`);
+    keyboard.row().text("Edit replacements", `r:e:${rule.id}:replaces`);
   }
 
   if (rule.builtin) {
@@ -89,12 +89,12 @@ export function chatRuleKeyboard(view: ChatRuleView, chatId: number): InlineKeyb
   keyboard.text(rule.enabled ? "Disable here" : "Enable here", `ct:${chatId}:${rule.id}`).row();
   keyboard.text("Rename", `ce:${chatId}:${rule.id}:name`);
   if (rule.mode === "host") {
-    keyboard.row().text("Edit hosts", `ce:${chatId}:${rule.id}:fromHosts`);
-    keyboard.row().text("Edit destination", `ce:${chatId}:${rule.id}:toHost`);
+    keyboard.row().text("Edit match hosts", `ce:${chatId}:${rule.id}:match`);
+    keyboard.row().text("Edit replaces", `ce:${chatId}:${rule.id}:replaces`);
     keyboard.row().text(rule.stripQuery ? "Keep query params" : "Strip query params", `cq:${chatId}:${rule.id}`);
   } else {
     keyboard.row().text("Edit regex", `ce:${chatId}:${rule.id}:pattern`);
-    keyboard.row().text("Edit replacement", `ce:${chatId}:${rule.id}:replacement`);
+    keyboard.row().text("Edit replacements", `ce:${chatId}:${rule.id}:replaces`);
   }
   keyboard.row().text("Delete", `cd:${chatId}:${rule.id}`);
   keyboard.row().text("Back", `cr:${chatId}:0`);
@@ -137,6 +137,8 @@ export function groupKeyboard(group: GroupRecord): InlineKeyboard {
   } else {
     keyboard.text("Resume", `g:u:${group.chatId}`);
   }
+  keyboard.row();
+  keyboard.text(group.previewAll ? "Preview: each link" : "Preview: first only", `g:prev:${group.chatId}`);
   keyboard.row();
   keyboard.text("Chat rules", `cr:${group.chatId}:0`);
   keyboard.row().text("Back", "d:groups:0");
@@ -209,12 +211,12 @@ export function ruleSummary(rule: Rule, view?: ChatRuleView): string {
   }
   lines.push("");
   if (rule.mode === "host") {
-    lines.push(`Match hosts: <code>${escapeHtml(rule.fromHosts.join(", ") || "—")}</code>`);
-    lines.push(`Rewrite to: <code>${escapeHtml(rule.toHost ?? "—")}</code>`);
+    lines.push(`Match: <code>${escapeHtml(rule.match.join(", ") || "—")}</code>`);
+    lines.push(`Replaces: <code>${escapeHtml(rule.replaces.join(" → ") || "—")}</code>`);
     lines.push(`Strip query: ${rule.stripQuery ? "yes" : "no"}`);
   } else {
-    lines.push(`Regex: <code>${escapeHtml(rule.pattern ?? "—")}</code>`);
-    lines.push(`Replace: <code>${escapeHtml(rule.replacement ?? "—")}</code>`);
+    lines.push(`Regex: <code>${escapeHtml(rule.match[0] ?? "—")}</code>`);
+    lines.push(`Replaces: <code>${escapeHtml(rule.replaces.join(" → ") || "—")}</code>`);
   }
   return lines.join("\n");
 }

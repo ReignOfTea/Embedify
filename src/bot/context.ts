@@ -4,24 +4,22 @@ import type { RuleMode } from "../rules.js";
 export type CreateDraft = {
   name?: string;
   mode?: RuleMode;
-  fromHosts?: string[];
-  toHost?: string | null;
+  match?: string[];
+  replaces?: string[];
   stripQuery?: boolean;
-  pattern?: string | null;
-  replacement?: string | null;
 };
 
 export type WizardState =
   | {
       kind: "create";
-      step: "name" | "mode" | "fromHosts" | "toHost" | "stripQuery" | "pattern" | "replacement";
+      step: "name" | "mode" | "match" | "replaces" | "stripQuery" | "pattern";
       draft: CreateDraft;
       chatId: number | null;
     }
   | {
       kind: "edit";
       ruleId: string;
-      field: "name" | "fromHosts" | "toHost" | "pattern" | "replacement";
+      field: "name" | "match" | "replaces" | "pattern";
       chatId: number | null;
     };
 

@@ -4,7 +4,7 @@ import type { Store } from "../db.js";
 import {
   compilePattern,
   parseHostList,
-  parseHostname,
+  parseStringList,
   rewriteUrl,
 } from "../rewrite.js";
 import { canManageChat, isBotOwner } from "./auth.js";
@@ -54,7 +54,7 @@ export function registerWizard(
     }
     ctx.session.wizard.draft.mode = ctx.match[1] as "host" | "regex";
     if (ctx.session.wizard.draft.mode === "host") {
-      ctx.session.wizard.step = "fromHosts";
+      ctx.session.wizard.step = "match";
       await prompt(
         ctx,
         "Send the host(s) to match, comma-separated.\nExample: <code>x.com, twitter.com</code>",
@@ -80,28 +80,28 @@ export function registerWizard(
     await finishCreate(ctx, store, config);
   });
 
-  bot.callbackQuery(/^r:e:([^:]+):(name|fromHosts|toHost|pattern|replacement)$/, async (ctx) => {
+  bot.callbackQuery(/^r:e:([^:]+):(name|match|replaces|pattern)$/, async (ctx) => {
     if (!isBotOwner(ctx, config)) {
       await ctx.answerCallbackQuery({ text: "Owners only", show_alert: true });
       return;
     }
     const ruleId = ctx.match[1]!;
-    const field = ctx.match[2] as "name" | "fromHosts" | "toHost" | "pattern" | "replacement";
+    const field = ctx.match[2] as "name" | "match" | "replaces" | "pattern";
     const rule = store.getRule(ruleId);
     if (!rule || rule.chatId != null) {
       await ctx.answerCallbackQuery({ text: "Edit local rules from that chat's /rules panel", show_alert: true });
       return;
     }
     ctx.session.wizard = { kind: "edit", ruleId, field, chatId: null };
-    await prompt(ctx, editPrompt(field));
+    await prompt(ctx, editPrompt(field, rule.mode));
   });
 
   bot.callbackQuery(
-    /^ce:(-?\d+):([^:]+):(name|fromHosts|toHost|pattern|replacement)$/,
+    /^ce:(-?\d+):([^:]+):(name|match|replaces|pattern)$/,
     async (ctx) => {
       const chatId = Number(ctx.match[1]);
       const ruleId = ctx.match[2]!;
-      const field = ctx.match[3] as "name" | "fromHosts" | "toHost" | "pattern" | "replacement";
+      const field = ctx.match[3] as "name" | "match" | "replaces" | "pattern";
       if (!(await canManageChat(ctx, config, chatId))) {
         await ctx.answerCallbackQuery({ text: "Admins only", show_alert: true });
         return;
@@ -112,7 +112,7 @@ export function registerWizard(
         return;
       }
       ctx.session.wizard = { kind: "edit", ruleId, field, chatId };
-      const text = editPrompt(field);
+      const text = editPrompt(field, rule.mode);
       if (ctx.chat?.type === "private") {
         await prompt(ctx, text);
         return;
@@ -173,7 +173,7 @@ export function registerWizard(
       return;
     }
 
-    await handleEdit(ctx, store, config, wizard.ruleId, wizard.field, wizard.chatId, ctx.message.text);
+    await handleEdit(ctx, store, config, wizard.ruleId, wizard.field, wizard.chatId, ctx.message.text, store.getRule(wizard.ruleId)?.mode === "regex");
   });
 }
 
@@ -197,7 +197,7 @@ async function handleCreateStep(
     return;
   }
 
-  if (step === "fromHosts") {
+  if (step === "match") {
     const hosts = parseHostList(text);
     if (hosts.length === 0) {
       await ctx.reply("I could not parse any hosts. Try <code>x.com, twitter.com</code>.", {
@@ -205,19 +205,27 @@ async function handleCreateStep(
       });
       return;
     }
-    draft.fromHosts = hosts;
-    ctx.session.wizard.step = "toHost";
-    await prompt(ctx, "Send the destination host.\nExample: <code>fixupx.com</code>");
+    draft.match = hosts;
+    ctx.session.wizard.step = "replaces";
+    await prompt(
+      ctx,
+      "Send destination hosts in priority order, comma-separated.\nFirst healthy host wins.\nExample: <code>fixupx.com, fxtwitter.com, vxtwitter.com</code>",
+    );
     return;
   }
 
-  if (step === "toHost") {
-    const host = parseHostname(text);
-    if (!host) {
-      await ctx.reply("That does not look like a hostname.");
+  if (step === "replaces") {
+    const replaces =
+      draft.mode === "regex" ? parseStringList(text) : parseHostList(text);
+    if (replaces.length === 0) {
+      await ctx.reply("I could not parse any replacements.");
       return;
     }
-    draft.toHost = host;
+    draft.replaces = replaces;
+    if (draft.mode === "regex") {
+      await finishCreate(ctx, store, config);
+      return;
+    }
     ctx.session.wizard.step = "stripQuery";
     await render(
       ctx,
@@ -234,22 +242,12 @@ async function handleCreateStep(
       await ctx.reply("That regex did not compile. Send a valid JavaScript regex.");
       return;
     }
-    draft.pattern = text;
-    ctx.session.wizard.step = "replacement";
+    draft.match = [text];
+    ctx.session.wizard.step = "replaces";
     await prompt(
       ctx,
-      "Send the replacement string. Capture groups are <code>$1</code>, <code>$2</code>, …\nExample: <code>https://fixupx.com/$1</code>",
+      "Send replacement strings in priority order (one per line or comma-separated). Capture groups are <code>$1</code>, <code>$2</code>, …\nExample: <code>https://fixupx.com/$1</code>",
     );
-    return;
-  }
-
-  if (step === "replacement") {
-    draft.replacement = text.trim();
-    if (!draft.replacement) {
-      await ctx.reply("Replacement cannot be empty.");
-      return;
-    }
-    await finishCreate(ctx, store, config);
   }
 }
 
@@ -258,9 +256,10 @@ async function handleEdit(
   store: Store,
   config: AppConfig,
   ruleId: string,
-  field: "name" | "fromHosts" | "toHost" | "pattern" | "replacement",
+  field: "name" | "match" | "replaces" | "pattern",
   chatId: number | null,
   text: string,
+  regexMode: boolean,
 ): Promise<void> {
   const rule = store.getRule(ruleId);
   if (!rule) {
@@ -276,20 +275,20 @@ async function handleEdit(
       return;
     }
     store.updateRule(ruleId, { name });
-  } else if (field === "fromHosts") {
-    const fromHosts = parseHostList(text);
-    if (fromHosts.length === 0) {
+  } else if (field === "match") {
+    const match = parseHostList(text);
+    if (match.length === 0) {
       await ctx.reply("I could not parse any hosts.");
       return;
     }
-    store.updateRule(ruleId, { fromHosts });
-  } else if (field === "toHost") {
-    const toHost = parseHostname(text);
-    if (!toHost) {
-      await ctx.reply("That does not look like a hostname.");
+    store.updateRule(ruleId, { match });
+  } else if (field === "replaces") {
+    const replaces = regexMode ? parseStringList(text) : parseHostList(text);
+    if (replaces.length === 0) {
+      await ctx.reply("I could not parse any replacements.");
       return;
     }
-    store.updateRule(ruleId, { toHost });
+    store.updateRule(ruleId, { replaces });
   } else if (field === "pattern") {
     try {
       compilePattern(text);
@@ -297,14 +296,7 @@ async function handleEdit(
       await ctx.reply("That regex did not compile.");
       return;
     }
-    store.updateRule(ruleId, { pattern: text });
-  } else if (field === "replacement") {
-    const replacement = text.trim();
-    if (!replacement) {
-      await ctx.reply("Replacement cannot be empty.");
-      return;
-    }
-    store.updateRule(ruleId, { replacement });
+    store.updateRule(ruleId, { match: [text] });
   }
 
   ctx.session.wizard = null;
@@ -333,11 +325,9 @@ async function finishCreate(ctx: BotContext, store: Store, config: AppConfig): P
   const rule = store.createRule({
     name: draft.name,
     mode: draft.mode,
-    fromHosts: draft.fromHosts ?? [],
-    toHost: draft.toHost ?? null,
+    match: draft.match ?? [],
+    replaces: draft.replaces ?? [],
     stripQuery: draft.stripQuery ?? true,
-    pattern: draft.pattern ?? null,
-    replacement: draft.replacement ?? null,
     enabled: true,
     chatId: wizard.chatId,
   });
@@ -345,8 +335,8 @@ async function finishCreate(ctx: BotContext, store: Store, config: AppConfig): P
   const chatId = wizard.chatId;
   ctx.session.wizard = null;
   const sample =
-    rule.mode === "host" && rule.fromHosts[0]
-      ? rewriteUrl(`https://${rule.fromHosts[0]}/example`, [rule])
+    rule.mode === "host" && rule.match[0]
+      ? rewriteUrl(`https://${rule.match[0]}/example`, [rule])
       : null;
   const extra = sample
     ? `\n\nSample: <code>${escapeHtml(sample.original)}</code> → <code>${escapeHtml(sample.rewritten)}</code>`
@@ -384,17 +374,20 @@ async function canContinueWizard(
   return canManageChat(ctx, config, rule?.chatId ?? wizard.chatId);
 }
 
-function editPrompt(field: "name" | "fromHosts" | "toHost" | "pattern" | "replacement"): string {
+function editPrompt(
+  field: "name" | "match" | "replaces" | "pattern",
+  mode: "host" | "regex" = "host",
+): string {
   switch (field) {
     case "name":
       return "Send the new name.";
-    case "fromHosts":
+    case "match":
       return "Send the host(s) to match, comma-separated.";
-    case "toHost":
-      return "Send the destination host.";
+    case "replaces":
+      return mode === "regex"
+        ? "Send replacement strings in priority order (one per line or comma-separated)."
+        : "Send destination hosts in priority order, comma-separated.\nExample: <code>fixupx.com, fxtwitter.com</code>";
     case "pattern":
       return "Send the new JavaScript regex (no surrounding slashes).";
-    case "replacement":
-      return "Send the new replacement string.";
   }
 }
