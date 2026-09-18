@@ -1,4 +1,4 @@
-import { firstHealthyCandidate } from "./health.js";
+import { pickHealthyCandidate } from "./health.js";
 import { resolvePublicUrl, shouldFollowRedirects } from "./resolve.js";
 import {
   fixerHosts,
@@ -25,8 +25,8 @@ export async function embedifyUrls(urls: string[], rules: RewriteRule[]): Promis
   const seen = new Set<string>();
   const fixers = fixerHosts(rules);
 
-  for (const original of urls) {
-    const result = await embedifyOne(original, rules, fixers);
+  const results = await Promise.all(urls.map((url) => embedifyOne(url, rules, fixers)));
+  for (const result of results) {
     for (const failure of result.failures) failures.push(failure);
     if (!result.hit || seen.has(result.hit.rewritten)) continue;
     seen.add(result.hit.rewritten);
@@ -44,9 +44,8 @@ async function embedifyOne(
   const failures: RewriteFailure[] = [];
   let working = original;
   let plan = rewritePlan(working, rules);
-  const follow = shouldFollowRedirects(original, fixers) || !plan;
 
-  if (follow) {
+  if (shouldFollowRedirects(original, fixers)) {
     const resolved = await resolvePublicUrl(original);
     if (resolved.error) {
       failures.push({
@@ -66,7 +65,7 @@ async function embedifyOne(
     return { hit: null, failures };
   }
 
-  const { pick, failedHosts } = await firstHealthyCandidate(plan.candidates);
+  const { pick, failedHosts } = pickHealthyCandidate(plan.candidates);
   if (failedHosts.length > 0) {
     const exhausted = failedHosts.length >= plan.candidates.length;
     failures.push({

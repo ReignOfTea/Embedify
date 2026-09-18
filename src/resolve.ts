@@ -4,15 +4,14 @@ import { hostnameOf, normalizeHost } from "./rewrite.js";
 import { log } from "./logger.js";
 
 const MAX_REDIRECTS = 5;
-const RESOLVE_TIMEOUT_MS = 4_000;
-const DNS_TIMEOUT_MS = 2_500;
+const RESOLVE_TIMEOUT_MS = 1_500;
+const DNS_TIMEOUT_MS = 800;
 const MAX_URL_LENGTH = 2_048;
 
 const SHORT_HOSTS = new Set([
   "t.co",
   "vm.tiktok.com",
   "vt.tiktok.com",
-  "m.tiktok.com",
   "bit.ly",
   "tinyurl.com",
   "cutt.ly",
@@ -63,7 +62,7 @@ export function shouldFollowRedirects(url: string, fixerHostSet: Set<string>): b
   const host = normalizeHost(parsed.hostname);
   if (fixerHostSet.has(host)) return false;
   if (SHORT_HOSTS.has(host)) return true;
-  if (host.endsWith(".tiktok.com") && host !== "tiktok.com") return true;
+  if (host === "tiktok.com" && /^\/t\//i.test(parsed.pathname)) return true;
   if (host === "instagram.com" && /^\/(share|stories)\b/i.test(parsed.pathname)) return true;
   return false;
 }
@@ -94,6 +93,7 @@ export async function resolvePublicUrl(url: string): Promise<ResolveResult> {
           "User-Agent": "Embedify/1.0 (+https://github.com/ReignOfTea/Embedify)",
         },
       });
+      void response.body?.cancel();
     } catch (error) {
       const timeout = error instanceof Error && error.name === "TimeoutError";
       log.warn(`Redirect resolve failed for ${hostHint(current)}`, error);
